@@ -9,14 +9,8 @@ jobs:
     strategy:
       matrix:
         python-version:
-          - 3.7
-          - 3.8
-          - 3.9
           - '3.10'
-        test-dir:
-          - client
-          - server
-    name: ${{ matrix.test-dir }} tests with python ${{ matrix.python-version }}
+    name: tests with python ${{ matrix.python-version }}
     env:
       AUTOTESTER_CONFIG: server/autotest_server/tests/fixtures/test_config.yml
     steps:
@@ -33,6 +27,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
       - name: Install python packages
-        run: python -m pip install pytest fakeredis -r ${{ matrix.test-dir }}/requirements.txt
+        run: python -m pip install pytest fakeredis -r requirements.txt
       - name: run tests
         run: pytest ${{ matrix.test-dir }}

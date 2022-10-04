@@ -4,78 +4,38 @@ services:
   server:
     build:
       context: ./server
-      dockerfile: ./.dockerfiles/Dockerfile
-      args:
-        UBUNTU_VERSION: '20.04'
-        LOGIN_USER: 'docker'
-        WORKSPACE: '/home/docker/.autotesting'
-    image: markus-autotest-server-dev:1.1.0
+      target: dev
+    image: autotest-server-dev:1.1.0
     volumes:
-      - ./server:/app:cached
-      - workspace:/home/docker/.autotesting:rw
+      - .:/app
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - REDIS_URL=redis://redis:6379/
-      - WORKSPACE=/home/docker/.autotesting
-      - SUPERVISOR_URL=127.0.0.1:9001
-      - AUTOTESTER_CONFIG=/app/.dockerfiles/docker-config.yml
-    depends_on:
-      - postgres
-      - redis
-
-  client:
-    build:
-      context: ./client
-      dockerfile: ./.dockerfiles/Dockerfile
-      args:
-        UBUNTU_VERSION: '20.04'
-    image: markus-autotest-client-dev:1.1.0
-    container_name: 'autotest-client'
-    volumes:
-      - ./client:/app:cached
-    environment:
-      - REDIS_URL=redis://redis:6379/
-      - FLASK_HOST=0.0.0.0
-    ports:
-      - '5000:5000'
+      - REGISTRY_HOST=localhost:5001 # optional: use if you want to store images to a custom registry
+      - VOLUME_DRIVER=local
+      - VOLUME_DRIVER_OPTS={} # opts are json string
     depends_on:
       - redis
-      - server
-    networks:
-      - default
-      - markus_dev
+    deploy:
+      replicas: 2
 
-  postgres:
-    image: postgres:10
-    volumes:
-      - postgres_autotest:/var/lib/postgresql/data
-    environment:
-      - PSQL_HISTFILE=/root/log/.psql_history
-      - POSTGRES_HOST_AUTH_METHOD=trust
-    ports:
-      - '45432:5432'
-
-  redis:
-    image: redis:3.2-alpine
+  redis: # TODO: only have one redis container for the api and the backend
+    image: redis:7.0.4-alpine
     volumes:
       - redis_autotest:/data
     ports:
-      - 6379
+    - 6379
 
-  rq_dashboard:
-    image: eoranged/rq-dashboard
+  registry:
+    image: registry:2.8.1
     environment:
-      - RQ_DASHBOARD_REDIS_URL=redis://redis:6379/
+      - REGISTRY_HTTP_ADDR=0.0.0.0:5001
+    volumes:
+      - registry:/var/lib/registry
     ports:
-      - '9181:9181'
-    depends_on:
-      - redis
+      - '5001:5001'
 
 volumes:
   postgres_autotest:
   redis_autotest:
   workspace:
-
-networks:
-  markus_dev:
-    external:
-      name: markus_dev

@@ -1,1 +1,1 @@
-# autotest-backend-basic
+# autotest-backend-classic
