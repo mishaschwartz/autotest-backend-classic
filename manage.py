@@ -13,9 +13,11 @@ from autotest_backend import redis_connection, run_test_command
 
 SKELETON_FILE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "schema_skeleton.json")
 
+
 def _schema_skeleton():
     with open(SKELETON_FILE) as f:
         return json.load(f)
+
 
 def _print(*args_, **kwargs):
     print("[AUTOTESTER]", *args_, **kwargs)
@@ -24,43 +26,38 @@ def _print(*args_, **kwargs):
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    subparsers = parser.add_subparsers(dest='manager')
+    subparsers = parser.add_subparsers(dest="manager")
 
-    subparsers.add_parser('tester', help='testers', description='testers')
-    subparsers.add_parser('plugin', help='plugins', description='plugins')
-    subparsers.add_parser('data', help='data', description='data')
+    subparsers.add_parser("tester", help="testers", description="testers")
+    subparsers.add_parser("plugin", help="plugins", description="plugins")
+    subparsers.add_parser("data", help="data", description="data")
 
     for name, parser_ in subparsers.choices.items():
-        subsubparser = parser_.add_subparsers(dest='action')
+        subsubparser = parser_.add_subparsers(dest="action")
 
-        install_parser = subsubparser.add_parser('install', help=f'install {parser_.description}')
+        install_parser = subsubparser.add_parser("install", help=f"install {parser_.description}")
 
-        if name == 'data':
-            install_parser.add_argument('name', help='unique name to give the data')
-            install_parser.add_argument('path', help='path to a file or directory on disk that contains the data')
+        if name == "data":
+            install_parser.add_argument("name", help="unique name to give the data")
+            install_parser.add_argument("path", help="path to a file or directory on disk that contains the data")
         else:
-            install_parser.add_argument('paths', nargs='+')
+            install_parser.add_argument("paths", nargs="+")
 
-        remove_parser = subsubparser.add_parser('remove', help=f'remove {parser_.description}')
-        remove_parser.add_argument('names', nargs='+')
+        remove_parser = subsubparser.add_parser("remove", help=f"remove {parser_.description}")
+        remove_parser.add_argument("names", nargs="+")
 
-        subsubparser.add_parser('list', help=f'list {parser_.description}')
+        subsubparser.add_parser("list", help=f"list {parser_.description}")
 
-        subsubparser.add_parser('clean', help=f'remove {parser_.description} that have been deleted on disk.')
+        subsubparser.add_parser("clean", help=f"remove {parser_.description} that have been deleted on disk.")
 
-    subparsers.add_parser('install', help='install backend')
+    subparsers.add_parser("install", help="install backend")
 
-    managers = {
-        "install": BackendManager,
-        "tester": TesterManager,
-        "plugin": PluginManager,
-        "data": DataManager
-    }
+    managers = {"install": BackendManager, "tester": TesterManager, "plugin": PluginManager, "data": DataManager}
 
     args = parser.parse_args()
 
-    if args.manager == 'install':
-        args.action = 'install'
+    if args.manager == "install":
+        args.action = "install"
 
     return managers[args.manager], args
 
@@ -72,16 +69,19 @@ class PluginManager:
     def install(self):
         skeleton = _schema_skeleton()
         for path in self.args.paths:
-            cli = os.path.join(path, 'docker.cli')
+            cli = os.path.join(path, "docker.cli")
             if os.path.isfile(cli):
-                proc = subprocess.run([cli, 'install'], capture_output=True, check=False, universal_newlines=True)
+                proc = subprocess.run([cli, "install"], capture_output=True, check=False, universal_newlines=True)
                 if proc.returncode:
                     _print(f"Plugin installation at {path} failed with:\n{proc.stderr}", file=sys.stderr, flush=True)
                     continue
-                proc = subprocess.run([cli, 'settings'], capture_output=True, check=False, universal_newlines=True)
+                proc = subprocess.run([cli, "settings"], capture_output=True, check=False, universal_newlines=True)
                 if proc.returncode:
-                    _print(f"Plugin settings could not be retrieved from plugin at {path}. Failed with:\n{proc.stderr}",
-                           file=sys.stderr, flush=True)
+                    _print(
+                        f"Plugin settings could not be retrieved from plugin at {path}. Failed with:\n{proc.stderr}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                     continue
                 settings = json.loads(proc.stdout)
                 plugin_name = list(settings.keys())[0]
@@ -110,7 +110,7 @@ class PluginManager:
     @staticmethod
     def _get_installed():
         for plugin_key in redis_connection().keys("autotest:tuple:*"):
-            plugin_name = plugin_key.split(':')[-1]
+            plugin_name = plugin_key.split(":")[-1]
             path = redis_connection().get(plugin_key)
             yield plugin_name, path
 
@@ -129,21 +129,25 @@ class TesterManager:
         self.args = args
 
     def install(self):
-        skeleton_file = os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                                     "autotest_backend", "schema_skeleton.json")
+        skeleton_file = os.path.join(
+            os.path.dirname(os.path.realpath(__file__)), "autotest_backend", "schema_skeleton.json"
+        )
         with open(skeleton_file) as f:
             skeleton = json.load(f)
         for path in self.args.paths:
-            cli = os.path.join(path, 'classic.cli')
+            cli = os.path.join(path, "classic.cli")
             if os.path.isfile(cli):
-                proc = subprocess.run([cli, 'install'], capture_output=True, check=False, universal_newlines=True)
+                proc = subprocess.run([cli, "install"], capture_output=True, check=False, universal_newlines=True)
                 if proc.returncode:
                     _print(f"Tester installation at {path} failed with:\n{proc.stderr}", file=sys.stderr, flush=True)
                     continue
-                proc = subprocess.run([cli, 'settings'], capture_output=True, check=False, universal_newlines=True)
+                proc = subprocess.run([cli, "settings"], capture_output=True, check=False, universal_newlines=True)
                 if proc.returncode:
-                    _print(f"Tester settings could not be retrieved from tester at {path}. Failed with:\n{proc.stderr}",
-                           file=sys.stderr, flush=True)
+                    _print(
+                        f"Tester settings could not be retrieved from tester at {path}. Failed with:\n{proc.stderr}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                     continue
                 settings = json.loads(proc.stdout)
                 tester_name = settings["properties"]["tester_type"]["const"]
@@ -157,8 +161,9 @@ class TesterManager:
         redis_connection().set("autotest:schema", json.dumps(skeleton))
 
     def remove(self, additional=tuple()):
-        skeleton_file = os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                                     "autotest_backend", "schema_skeleton.json")
+        skeleton_file = os.path.join(
+            os.path.dirname(os.path.realpath(__file__)), "autotest_backend", "schema_skeleton.json"
+        )
         with open(skeleton_file) as f:
             skeleton = json.load(f)
 
@@ -177,7 +182,7 @@ class TesterManager:
     @staticmethod
     def _get_installed():
         for tester_key in redis_connection().keys("autotest:tester:*"):
-            tester_name = tester_key.split(':')[-1]
+            tester_name = tester_key.split(":")[-1]
             path = redis_connection().get(tester_key)
             yield tester_name, path
 
@@ -222,7 +227,7 @@ class DataManager:
     @staticmethod
     def _get_installed():
         for data_key in redis_connection().keys("autotest:data:*"):
-            data_name = data_key.split(':')[-1]
+            data_name = data_key.split(":")[-1]
             path = redis_connection().get(data_key)
             yield data_name, path
 
@@ -256,7 +261,8 @@ class BackendManager:
             except KeyError:
                 raise Exception(f"user with username {username} does not exist")
             _print(
-                f"checking if worker with username {username} can be accessed by the current user {getpass.getuser()}")
+                f"checking if worker with username {username} can be accessed by the current user {getpass.getuser()}"
+            )
             try:
                 subprocess.run(
                     run_test_command(username).format("echo test"), stdout=subprocess.DEVNULL, shell=True, check=True

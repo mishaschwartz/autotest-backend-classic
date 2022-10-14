@@ -93,6 +93,7 @@ def get_available_port(min_, max_, host: str = "localhost") -> str:
         except OSError:
             continue
 
+
 def set_up_plugins(test_username, plugin_data):
     environment = {}
     for name, data in plugin_data.items():
@@ -100,17 +101,18 @@ def set_up_plugins(test_username, plugin_data):
             path = redis_connection().get(f"autotest:plugin:{name}")
             if path is None:
                 raise Exception(f"plugin {name} is not installed")
-            cli = os.path.join(path, 'classic.cli')
-            stringified_data = {k: str(v) for k, v in data.items() if k != 'enabled'}
+            cli = os.path.join(path, "classic.cli")
+            stringified_data = {k: str(v) for k, v in data.items() if k != "enabled"}
             proc = subprocess.run(
-                [cli, 'before_test', test_username],
+                [cli, "before_test", test_username],
                 capture_output=True,
                 check=False,
                 universal_newlines=True,
-                env=stringified_data
+                env=stringified_data,
             )
             environment.update(json.loads(proc.stdout))
     return environment
+
 
 def get_data_environment(data_names):
     environment = {}
@@ -122,6 +124,7 @@ def get_data_environment(data_names):
             raise Exception(f"data {name} at path {path} does not exist")
         environment[f"AUTOTEST_DATA_{name.upper()}"] = path
     return environment
+
 
 def _get_env_vars(test_username: str, plugin_data: Dict, data_names: List) -> Dict[str, str]:
     """Return a dictionary containing all environment variables to pass to the next test"""
@@ -385,8 +388,8 @@ def update_test_settings(user, settings_id, test_settings, file_url):
                 version = env_data.get("version", "")
                 requirements = env_data.get("requirements", "")
                 proc = subprocess.run(
-                    [os.path.join(tester_path, 'classic.cli'), 'create_environment', version, requirements, env_dir],
-                    capture_output=True
+                    [os.path.join(tester_path, "classic.cli"), "create_environment", version, requirements, env_dir],
+                    capture_output=True,
                 )
                 if proc.returncode:
                     raise Exception(proc.stderr)
