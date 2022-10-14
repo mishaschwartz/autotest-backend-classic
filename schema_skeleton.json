@@ -16,6 +16,20 @@
     },
     "tester_schemas": {
       "oneOf": []
+    },
+    "plugins": {
+      "type": "object",
+      "title": "Plugins",
+      "properties": {}
+    },
+    "data_volumes": {
+      "type": "array",
+      "title": "Data Entries",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": []
+      }
     }
   },
   "type": "object",

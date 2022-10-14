@@ -1,5 +1,4 @@
 import os
-import sys
 import shutil
 import time
 import json
@@ -10,8 +9,6 @@ import getpass
 import requests
 import gzip
 import redis
-import importlib
-import psycopg2
 import mimetypes
 from typing import Optional, Dict, Union, List, Tuple, Callable, Type
 from types import TracebackType
@@ -19,7 +16,6 @@ from types import TracebackType
 from .config import config
 from .utils import loads_partial_json, set_rlimits_before_test, extract_zip_stream, recursive_iglob, copy_tree
 
-DEFAULT_ENV_DIR = "defaultvenv"
 REDIS_URL = config["redis_url"]
 TEST_SCRIPT_DIR = os.path.join(config["workspace"], "scripts")
 
@@ -85,23 +81,6 @@ def _kill_user_processes(test_username: str) -> None:
     subprocess.run(kill_cmd, shell=True)
 
 
-def _create_test_script_command(tester_type: str) -> str:
-    """
-    Return string representing a command line command to
-    run tests.
-    """
-    import_line = f"from testers.{tester_type}.{tester_type}_tester import {tester_type.capitalize()}Tester as Tester"
-    python_lines = [
-        "import sys, json",
-        f'sys.path.append("{os.path.dirname(os.path.abspath(__file__))}")',
-        import_line,
-        "from testers.specs import TestSpecs",
-        "Tester(specs=TestSpecs.from_json(sys.stdin.read())).run()",
-    ]
-    python_str = "; ".join(python_lines)
-    return f"\"${{PYTHON}}\" -c '{python_str}'"
-
-
 def get_available_port(min_, max_, host: str = "localhost") -> str:
     """Return the next available open port on host."""
     for next_port in range(min_, max_ + 1):
@@ -114,23 +93,46 @@ def get_available_port(min_, max_, host: str = "localhost") -> str:
         except OSError:
             continue
 
+def set_up_plugins(test_username, plugin_data):
+    environment = {}
+    for name, data in plugin_data.items():
+        if data.get("enabled"):
+            path = redis_connection().get(f"autotest:plugin:{name}")
+            if path is None:
+                raise Exception(f"plugin {name} is not installed")
+            cli = os.path.join(path, 'classic.cli')
+            stringified_data = {k: str(v) for k, v in data.items() if k != 'enabled'}
+            proc = subprocess.run(
+                [cli, 'before_test', test_username],
+                capture_output=True,
+                check=False,
+                universal_newlines=True,
+                env=stringified_data
+            )
+            environment.update(json.loads(proc.stdout))
+    return environment
 
-def _get_env_vars(test_username: str) -> Dict[str, str]:
+def get_data_environment(data_names):
+    environment = {}
+    for name in data_names:
+        path = redis_connection().get(f"autotest:data:{name}")
+        if path is None:
+            raise Exception(f"data {name} is not installed")
+        if not os.path.exists(path):
+            raise Exception(f"data {name} at path {path} does not exist")
+        environment[f"AUTOTEST_DATA_{name.upper()}"] = path
+    return environment
+
+def _get_env_vars(test_username: str, plugin_data: Dict, data_names: List) -> Dict[str, str]:
     """Return a dictionary containing all environment variables to pass to the next test"""
-    env_vars = {}
+    env_vars = {"AUTOTESTENV": "true", **set_up_plugins(test_username, plugin_data), **get_data_environment(data_names)}
     worker_config = [w for w in config["workers"] if w["user"] == test_username][0]
     resources_config = worker_config.get("resources", {})
     if resources_config:
         port_config = resources_config.get("port")
         if port_config:
             env_vars["PORT"] = get_available_port(port_config["min"], port_config["max"])
-        postgresql_url = resources_config.get("postgresql_url")
-        if postgresql_url:
-            with psycopg2.connect(postgresql_url) as conn:  # requires postgres 9.2+
-                with conn.cursor() as cursor:
-                    cursor.execute("DROP OWNED BY CURRENT_USER;")
-            env_vars["DATABASE_URL"] = postgresql_url
-            env_vars["AUTOTESTENV"] = "true"
+
     return env_vars
 
 
@@ -190,10 +192,7 @@ def _run_test_specs(
     results = []
 
     for settings in test_settings["testers"]:
-        tester_type = settings["tester_type"]
-
-        cmd_str = _create_test_script_command(tester_type)
-        args = cmd.format(cmd_str)
+        args = cmd.format(settings["_command"])
 
         for test_data in settings["test_data"]:
             test_category = test_data.get("category", [])
@@ -202,8 +201,11 @@ def _run_test_specs(
                 out, err = "", ""
                 timeout_expired = None
                 timeout = test_data.get("timeout")
+                plugin_data = test_data.get("plugins", {})
+                data_names = test_data.get("data_volumes", [])
                 try:
-                    env_vars = {**os.environ, **_get_env_vars(test_username), **settings["_env"]}
+                    additional_env_vars = _get_env_vars(test_username, plugin_data, data_names)
+                    env_vars = {**os.environ, **additional_env_vars, **settings["_env"]}
                     env_vars = _update_env_vars(env_vars, test_env_vars)
                     proc = subprocess.Popen(
                         args,
@@ -215,7 +217,7 @@ def _run_test_specs(
                         stdin=subprocess.PIPE,
                         preexec_fn=set_rlimits_before_test,
                         universal_newlines=True,
-                        env={**os.environ, **env_vars, **settings["_env"]},
+                        env=env_vars,
                     )
                     try:
                         settings_json = json.dumps({**settings, "test_data": test_data})
@@ -376,12 +378,21 @@ def update_test_settings(user, settings_id, test_settings, file_url):
             if tester_type not in installed_testers:
                 raise Exception(f"tester {tester_type} is not installed")
             env_dir = os.path.join(settings_dir, f"{tester_type}_{i}")
-            tester_install = importlib.import_module(f"autotest_server.testers.{tester_type}.setup")
-            default_env = os.path.join(TEST_SCRIPT_DIR, DEFAULT_ENV_DIR)
-            if not os.path.isdir(default_env):
-                subprocess.run([sys.executable, "-m", "venv", default_env], check=True)
+
+            tester_path = redis_connection().get(f"autotest:tester:{tester_type}")
             try:
-                tester_settings["_env"] = tester_install.create_environment(tester_settings, env_dir, default_env)
+                env_data = tester_settings.get("env_data", {})
+                version = env_data.get("version", "")
+                requirements = env_data.get("requirements", "")
+                proc = subprocess.run(
+                    [os.path.join(tester_path, 'classic.cli'), 'create_environment', version, requirements, env_dir],
+                    capture_output=True
+                )
+                if proc.returncode:
+                    raise Exception(proc.stderr)
+                result = json.loads(proc.stdout)
+                tester_settings["_command"] = result.pop("COMMAND")
+                tester_settings["_env"] = result
             except Exception as e:
                 raise Exception(f"create tester environment failed:\n{e}") from e
             test_settings["testers"][i] = tester_settings

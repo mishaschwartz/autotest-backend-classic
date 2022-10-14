@@ -3,21 +3,21 @@ version: '3.7'
 services:
   server:
     build:
-      context: ./server
-      target: dev
-    image: autotest-server-dev:1.1.0
+      dockerfile: ./.dockerfiles/Dockerfile
+      args:
+        LOGIN_USER: 'docker'
+        WORKSPACE: '/home/docker/.autotesting'
+    image: autotest-backend-classic-dev:1.0.0
     volumes:
-      - .:/app
-      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/app:cached
+      - workspace:/home/docker/.autotesting:rw
     environment:
       - REDIS_URL=redis://redis:6379/
-      - REGISTRY_HOST=localhost:5001 # optional: use if you want to store images to a custom registry
-      - VOLUME_DRIVER=local
-      - VOLUME_DRIVER_OPTS={} # opts are json string
+      - WORKSPACE=/home/docker/.autotesting
+      - SUPERVISOR_URL=127.0.0.1:9001
+      - AUTOTESTER_CONFIG=/app/.dockerfiles/docker-config.yml
     depends_on:
       - redis
-    deploy:
-      replicas: 2
 
   redis: # TODO: only have one redis container for the api and the backend
     image: redis:7.0.4-alpine
@@ -26,16 +26,11 @@ services:
     ports:
     - 6379
 
-  registry:
-    image: registry:2.8.1
-    environment:
-      - REGISTRY_HTTP_ADDR=0.0.0.0:5001
-    volumes:
-      - registry:/var/lib/registry
-    ports:
-      - '5001:5001'
-
 volumes:
   postgres_autotest:
   redis_autotest:
   workspace:
+
+networks:
+  markus_dev:
+    name: markus_dev
