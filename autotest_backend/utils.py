@@ -1,10 +1,15 @@
+"""
+General utility functions used by the autotest_backend scripts
+"""
+
 import json
 import resource
 import os
 import zipfile
 import shutil
 from io import BytesIO
-from typing import Type, Optional, Tuple, List, Generator
+from typing import Type, Optional, Tuple, List, Generator, Callable
+from types import TracebackType
 from .config import config
 
 RLIMIT_ADJUSTMENTS = {"nproc": 10}
@@ -41,7 +46,14 @@ def loads_partial_json(json_string: str, expected_type: Optional[Type] = None) -
     return results, malformed
 
 
-def _rlimit_str2int(rlimit_string):
+def _rlimit_str2int(rlimit_string: str) -> int:
+    """
+    Return the integer associated to the rlimit constant named rlimit_string
+    used by the resource module.
+
+    >>> _rlimit_str2int('nproc')
+    7
+    """
     return getattr(resource, f"RLIMIT_{rlimit_string.upper()}")
 
 
@@ -128,3 +140,15 @@ def copy_tree(src: str, dst: str, exclude: Tuple = tuple()) -> List[Tuple[str, s
             shutil.copy2(file_or_dir, target)
         copied.append((fd, target))
     return copied
+
+
+def ignore_missing_dir_error(
+    _func: Callable,
+    _path: str,
+    excinfo: Tuple[Type[BaseException], BaseException, Optional[TracebackType]],
+) -> None:
+    """Used by shutil.rmtree to ignore a FileNotFoundError"""
+    err_type, err_inst, traceback = excinfo
+    if err_type == FileNotFoundError:
+        return
+    raise err_inst

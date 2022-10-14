@@ -1,3 +1,13 @@
+"""
+Loads configuration files from:
+
+- settings.yml
+- settings.local.yml
+- wherever the "AUTOTESTER_CONFIG" environment variable points
+
+and stores the values in a _Config instance referred to by the variable: config
+"""
+
 # Thanks to this blog post for how to load env vars with the yaml loader:
 #   https://medium.com/swlh/python-yaml-configuration-with-environment-variables-parsing-77930f4273ac
 
@@ -9,7 +19,7 @@ from collections.abc import Mapping
 import jsonschema
 import yaml
 
-DEFAULT_ROOT = os.path.dirname(__file__)
+DEFAULT_ROOT = os.path.dirname(os.path.dirname(__file__))
 ConfigValues = TypeVar("ConfigValues", List, Dict, str, int, float, type(None))
 
 
@@ -122,7 +132,7 @@ class _Config:
 
         return constructor
 
-    def _validate(self):
+    def _validate(self) -> None:
         with open(os.path.join(DEFAULT_ROOT, "settings_schema.json")) as f:
             schema = json.load(f)
         jsonschema.Draft7Validator(schema).validate(self._settings)

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+"""
+CLI to install the backend and manage plugins and data entries
+"""
+
 import grp
 import pwd
 import sys
@@ -8,22 +12,44 @@ import json
 import subprocess
 import getpass
 import argparse
+
+from typing import Dict, Callable, Sequence, Iterable, Tuple
+
 from autotest_backend.config import config
 from autotest_backend import redis_connection, run_test_command
 
-SKELETON_FILE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "schema_skeleton.json")
 
-
-def _schema_skeleton():
-    with open(SKELETON_FILE) as f:
+def _schema_skeleton() -> Dict:
+    """
+    Return a dictionary representation of the json loaded from the schema_skeleton.json file
+    """
+    with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), "schema_skeleton.json")) as f:
         return json.load(f)
 
 
-def _print(*args_, **kwargs):
+def _print(*args_, **kwargs) -> None:
+    """
+    Exactly the same as the builtin print function but prepends "[AUTOTESTER]"
+    """
     print("[AUTOTESTER]", *args_, **kwargs)
 
 
-def parse_args():
+class _Manager:
+    """
+    Abstract Manager class used to manage resources
+    """
+
+    args: argparse.Namespace
+
+    def __init__(self, args):
+        self.args = args
+
+
+def parse_args() -> Callable:
+    """
+    Parses command line arguments using the argparse module and returns a function to call to
+    execute the requested command.
+    """
     parser = argparse.ArgumentParser()
 
     subparsers = parser.add_subparsers(dest="manager")
@@ -59,14 +85,18 @@ def parse_args():
     if args.manager == "install":
         args.action = "install"
 
-    return managers[args.manager], args
+    return getattr(managers[args.manager](args), args.action)
 
 
-class PluginManager:
-    def __init__(self, args):
-        self.args = args
+class PluginManager(_Manager):
+    """
+    Manger for plugins
+    """
 
-    def install(self):
+    def install(self) -> None:
+        """
+        Install a plugin
+        """
         skeleton = _schema_skeleton()
         for path in self.args.paths:
             cli = os.path.join(path, "docker.cli")
@@ -93,7 +123,11 @@ class PluginManager:
                 redis_connection().set(f"autotest:plugin:{plugin_name}", path)
         redis_connection().set("autotest:schema", json.dumps(skeleton))
 
-    def remove(self, additional=tuple()):
+    def remove(self, additional: Sequence = tuple()):
+        """
+        Removes installed plugins specified in self.args. Additional plugins to remove can be specified
+        with the additional keyword
+        """
         skeleton = _schema_skeleton()
 
         installed_plugins = skeleton["definitions"]["plugins"]["properties"]
@@ -108,27 +142,40 @@ class PluginManager:
         redis_connection().set("autotest:schema", json.dumps(skeleton))
 
     @staticmethod
-    def _get_installed():
+    def _get_installed() -> Iterable[Tuple[str, str]]:
+        """
+        Yield the name and path of all installed plugins
+        """
         for plugin_key in redis_connection().keys("autotest:tuple:*"):
             plugin_name = plugin_key.split(":")[-1]
             path = redis_connection().get(plugin_key)
             yield plugin_name, path
 
-    def list(self):
+    def list(self) -> None:
+        """
+        Print the name and path of all installed plugins
+        """
         for plugin_name, path in self._get_installed():
             print(f"{plugin_name} @ {path}")
 
-    def clean(self):
+    def clean(self) -> None:
+        """
+        Remove all plugins that are installed but whose data has been removed from disk
+        """
         to_remove = [plugin_name for plugin_name, path in self._get_installed() if not os.path.isdir(path)]
-        _print("Removing the following testers:", *to_remove, sep="\t\n")
+        _print("Removing the following plugins:", *to_remove, sep="\t\n")
         self.remove(additional=to_remove)
 
 
-class TesterManager:
-    def __init__(self, args):
-        self.args = args
+class TesterManager(_Manager):
+    """
+    Manager for testers
+    """
 
-    def install(self):
+    def install(self) -> None:
+        """
+        Install a tester
+        """
         skeleton_file = os.path.join(
             os.path.dirname(os.path.realpath(__file__)), "autotest_backend", "schema_skeleton.json"
         )
@@ -160,7 +207,11 @@ class TesterManager:
                 redis_connection().set(f"autotest:tester:{tester_name}", path)
         redis_connection().set("autotest:schema", json.dumps(skeleton))
 
-    def remove(self, additional=tuple()):
+    def remove(self, additional: Sequence = tuple()) -> None:
+        """
+        Removes installed testers specified in self.args. Additional testers to remove can be specified
+        with the additional keyword
+        """
         skeleton_file = os.path.join(
             os.path.dirname(os.path.realpath(__file__)), "autotest_backend", "schema_skeleton.json"
         )
@@ -180,29 +231,43 @@ class TesterManager:
         redis_connection().set("autotest:schema", json.dumps(skeleton))
 
     @staticmethod
-    def _get_installed():
+    def _get_installed() -> Iterable[Tuple[str, str]]:
+        """
+        Yield the name and path of all installed testers
+        """
         for tester_key in redis_connection().keys("autotest:tester:*"):
             tester_name = tester_key.split(":")[-1]
             path = redis_connection().get(tester_key)
             yield tester_name, path
 
-    def list(self):
+    def list(self) -> None:
+        """
+        Print the name and path of all installed plugins
+        """
         for tester_name, path in self._get_installed():
             print(f"{tester_name} @ {path}")
 
-    def clean(self):
+    def clean(self) -> None:
+        """
+        Remove all testers that are installed but whose data has been removed from disk
+        """
         to_remove = [tester_name for tester_name, path in self._get_installed() if not os.path.isdir(path)]
         _print("Removing the following testers:", *to_remove, sep="\t\n")
         self.remove(additional=to_remove)
 
 
-class DataManager:
-    def __init__(self, args):
-        self.args = args
+class DataManager(_Manager):
+    """
+    Manager for data entries
+    """
 
-    def install(self):
+    def install(self) -> None:
+        """
+        Install a data entry
+        """
         skeleton = _schema_skeleton()
 
+        # the data_volumes key is used to be consistent with the autotest-backend-docker project
         installed_volumes = skeleton["definitions"]["data_volumes"]["items"]["enum"]
         name = self.args.name
         path = os.path.abspath(self.args.path)
@@ -216,7 +281,11 @@ class DataManager:
         redis_connection().set(f"autotest:data:{name}", path)
         redis_connection().set("autotest:schema", json.dumps(skeleton))
 
-    def remove(self, additional=tuple()):
+    def remove(self, additional: Sequence = tuple()) -> None:
+        """
+        Removes installed data entries specified in self.args. Additional entries to remove can be specified
+        with the additional keyword
+        """
         skeleton = _schema_skeleton()
         installed_volumes = skeleton["definitions"]["data_volumes"]["items"]["enum"]
         for name in self.args.names + additional:
@@ -225,25 +294,41 @@ class DataManager:
         redis_connection().set("autotest:schema", json.dumps(skeleton))
 
     @staticmethod
-    def _get_installed():
+    def _get_installed() -> Iterable[Tuple[str, str]]:
+        """
+        Yield the name and path of all installed data entries
+        """
         for data_key in redis_connection().keys("autotest:data:*"):
             data_name = data_key.split(":")[-1]
             path = redis_connection().get(data_key)
             yield data_name, path
 
-    def list(self):
+    def list(self) -> None:
+        """
+        Print the name and path of all installed entries
+        """
         for data_name, path in self._get_installed():
             print(f"{data_name} @ {path}")
 
-    def clean(self):
+    def clean(self) -> None:
+        """
+        Remove all data entries that are installed but whose data has been removed from disk
+        """
         to_remove = [data_name for data_name, path in self._get_installed() if not os.path.isdir(path)]
         _print("Removing the following data mappings:", *to_remove, sep="\t\n")
         self.remove(additional=to_remove)
 
 
-class BackendManager:
+class BackendManager(_Manager):
+    """
+    Manager for the autotest backend
+    """
+
     @staticmethod
-    def _check_dependencies():
+    def _check_dependencies() -> None:
+        """
+        Check if all dependencies are installed and accessible
+        """
         _print("checking if redis url is valid:")
         try:
             redis_connection().keys()
@@ -251,7 +336,14 @@ class BackendManager:
             raise Exception(f'Cannot connect to redis database with url: {config["redis_url"]}') from e
 
     @staticmethod
-    def _check_users_exist():
+    def _check_users_exist() -> None:
+        """
+        Checks that all users specified in the configuration files:
+
+        - exist
+        - can be sudo'd to from the current user (ex: "sudo -u other_user -- some command")
+        - has a primary group that the current user belongs to as well
+        """
         groups = {grp.getgrgid(g).gr_name for g in os.getgroups()}
         for w in config["workers"]:
             username = w["user"]
@@ -274,16 +366,21 @@ class BackendManager:
                 raise Exception(f"user {getpass.getuser()} does not belong to group: {username}")
 
     @staticmethod
-    def _create_workspace():
+    def _create_workspace() -> None:
+        """
+        Creates the workspace directory on disk if it doesn't exist already
+        """
         _print(f'creating workspace at {config["workspace"]}')
         os.makedirs(config["workspace"], exist_ok=True)
 
-    def install(self):
+    def install(self) -> None:
+        """
+        Check that the server is set up properly and create the workspace.
+        """
         self._check_dependencies()
         self._check_users_exist()
         self._create_workspace()
 
 
 if __name__ == "__main__":
-    MANAGER, ARGS = parse_args()
-    getattr(MANAGER(ARGS), ARGS.action)()
+    parse_args()()

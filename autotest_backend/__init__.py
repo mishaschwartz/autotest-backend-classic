@@ -1,3 +1,4 @@
+""" Autotest Backend: classic version """
 import os
 import shutil
 import time
@@ -10,20 +11,27 @@ import requests
 import gzip
 import redis
 import mimetypes
-from typing import Optional, Dict, Union, List, Tuple, Callable, Type
-from types import TracebackType
+from typing import Optional, Dict, Union, List, Tuple
 
 from .config import config
-from .utils import loads_partial_json, set_rlimits_before_test, extract_zip_stream, recursive_iglob, copy_tree
-
-REDIS_URL = config["redis_url"]
-TEST_SCRIPT_DIR = os.path.join(config["workspace"], "scripts")
+from .utils import (
+    loads_partial_json,
+    set_rlimits_before_test,
+    extract_zip_stream,
+    recursive_iglob,
+    copy_tree,
+    ignore_missing_dir_error,
+)
 
 ResultData = Dict[str, Union[str, int, type(None), Dict]]
 
 
 def redis_connection() -> redis.Redis:
-    return redis.Redis.from_url(REDIS_URL, decode_responses=True)
+    """
+    Return a connection to a redis database determined by the "redis_url"
+    configuration option.
+    """
+    return redis.Redis.from_url(config["redis_url"], decode_responses=True)
 
 
 def run_test_command(test_username: Optional[str] = None) -> str:
@@ -50,9 +58,18 @@ def _create_test_group_result(
     stdout: str, stderr: str, run_time: int, extra_info: Dict, feedback: List, timeout: Optional[int] = None
 ) -> ResultData:
     """
-    Return the arguments passed to this function in a dictionary. If stderr is
-    falsy, change it to None. Load the json string in stdout as a dictionary.
+    Loads the results from a json string in stdout and returns a diction ary containing
+    the results reported in that json string.
+
+    The json string in stdout may be only a partial json so this function parses it as
+    best it can and reports any additional non-json values as well in the "malformed" key.
+
+    If annotations exist in the loaded json from stdout, add those to the returned dictionary.
+    Otherwise, add the test result data to the returned dictionary.
+
+    All other arguments passed to this function are returned as keys in the dictionary.
     """
+
     all_results, malformed = loads_partial_json(stdout, dict)
     result = {
         "time": run_time,
@@ -94,7 +111,15 @@ def get_available_port(min_, max_, host: str = "localhost") -> str:
             continue
 
 
-def set_up_plugins(test_username, plugin_data):
+def set_up_plugins(test_username: str, plugin_data: Dict[str, Dict]) -> Dict[str, str]:
+    """
+    Return a dictionary containing environment variables required to run each installed and
+    enabled plugin.
+
+    This function also runs the "before_test" hook for each installed and enabled plugin.
+
+    See manage.py for more information about plugins and how to install them.
+    """
     environment = {}
     for name, data in plugin_data.items():
         if data.get("enabled"):
@@ -114,7 +139,15 @@ def set_up_plugins(test_username, plugin_data):
     return environment
 
 
-def get_data_environment(data_names):
+def get_data_environment(data_names: List[str]) -> Dict[str, str]:
+    """
+    Return a dictionary containing environment variables pointing to the data entries specified
+    by the data names in data_names if the entry exists.
+
+    Environment variable keys are formatted as AUTOTEST_DATA_NAME where NAME is the data name.
+
+    See manage.py for more information about data entries and how to install them.
+    """
     environment = {}
     for name in data_names:
         path = redis_connection().get(f"autotest:data:{name}")
@@ -139,7 +172,13 @@ def _get_env_vars(test_username: str, plugin_data: Dict, data_names: List) -> Di
     return env_vars
 
 
-def _get_feedback(test_data, tests_path, test_id):
+def _get_feedback(test_data: Dict, tests_path: str, test_id: int) -> List[Dict]:
+    """
+    Return a list of dictionaries which each contain information about a feedback
+    file stored in the redis database.
+
+    This function also stores the feedback file content in the redis database.
+    """
     feedback_files = test_data.get("feedback_file_names", [])
     feedback = []
     for feedback_file in feedback_files:
@@ -290,7 +329,7 @@ def _setup_files(settings_id: int, user: str, files_url: str, tests_path: str, t
         else:
             os.chmod(file_or_dir, 0o770)
         shutil.chown(file_or_dir, group=test_username)
-    test_script_dir = json.loads(redis_connection().hget("autotest:settings", settings_id))["_files"]
+    test_script_dir = json.loads(redis_connection().hget("autotest:settings", str(settings_id)))["_files"]
     script_files = copy_tree(test_script_dir, tests_path)
     for fd, file_or_dir in script_files:
         if fd == "d":
@@ -324,7 +363,22 @@ def tester_user() -> Tuple[str, str]:
     return user_name, user_workspace
 
 
-def run_test(settings_id, test_id, files_url, categories, user, test_env_vars):
+def run_test(
+    settings_id: Union[int, str],
+    test_id: Union[int, str],
+    files_url: str,
+    categories: List[str],
+    user: str,
+    test_env_vars: Dict[str, str],
+) -> None:
+    """
+    Run a single test with the files from files_url using the settings with id settings_id that match the category
+    in categories.
+    test_env_vars are passed to the test as additional anvironment variables.
+    user is used to authenticate with the request to the client to retrieve the files at files_url.
+
+    Results from the test are written back to the redis database using the test_id to label the results.
+    """
     results = []
     error = None
     try:
@@ -347,24 +401,21 @@ def run_test(settings_id, test_id, files_url, categories, user, test_env_vars):
         redis_connection().expire(key, 3600)  # TODO: make this configurable
 
 
-def ignore_missing_dir_error(
-    _func: Callable,
-    _path: str,
-    excinfo: Tuple[Type[BaseException], BaseException, Optional[TracebackType]],
-) -> None:
-    """Used by shutil.rmtree to ignore a FileNotFoundError"""
-    err_type, err_inst, traceback = excinfo
-    if err_type == FileNotFoundError:
-        return
-    raise err_inst
+def update_test_settings(user: str, settings_id: Union[str, int], test_settings: Dict, file_url: str) -> None:
+    """
+    Update the test settings with id == settings_id to test_settings.
+    user is used to authenticate with the request to the client to retrieve the files at files_url.
 
-
-def update_test_settings(user, settings_id, test_settings, file_url):
+    Updated settings will be written back to the redis database, files downloaded from file_url will
+    be stored on disk with files used to create the test environment (for example, a python virtual
+    environment or directory of R packages).
+    """
     try:
-        settings_dir = os.path.join(TEST_SCRIPT_DIR, str(settings_id))
+        test_script_dir = os.path.join(config["workspace"], "scripts")
+        settings_dir = os.path.join(test_script_dir, str(settings_id))
 
         os.makedirs(settings_dir, exist_ok=True)
-        os.chmod(TEST_SCRIPT_DIR, 0o755)
+        os.chmod(test_script_dir, 0o755)
 
         files_dir = os.path.join(settings_dir, "files")
         shutil.rmtree(files_dir, onerror=ignore_missing_dir_error)
