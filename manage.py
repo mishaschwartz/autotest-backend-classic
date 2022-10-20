@@ -95,7 +95,7 @@ class PluginManager(_Manager):
 
     def install(self) -> None:
         """
-        Install a plugin
+        Install plugins
         """
         skeleton = _schema_skeleton()
         for path in self.args.paths:
@@ -174,7 +174,7 @@ class TesterManager(_Manager):
 
     def install(self) -> None:
         """
-        Install a tester
+        Install testers
         """
         skeleton_file = os.path.join(
             os.path.dirname(os.path.realpath(__file__)), "autotest_backend", "schema_skeleton.json"
@@ -242,7 +242,7 @@ class TesterManager(_Manager):
 
     def list(self) -> None:
         """
-        Print the name and path of all installed plugins
+        Print the name and path of all installed testers
         """
         for tester_name, path in self._get_installed():
             print(f"{tester_name} @ {path}")

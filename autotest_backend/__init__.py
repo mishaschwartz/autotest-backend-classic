@@ -36,7 +36,7 @@ def redis_connection() -> redis.Redis:
 
 def run_test_command(test_username: Optional[str] = None) -> str:
     """
-    Return a command used to run test scripts as a the test_username
+    Return a command used to run test scripts as the test_username
     user, with the correct arguments. Set test_username to None to
     run as the current user.
 
@@ -345,7 +345,7 @@ def tester_user() -> Tuple[str, str]:
     environment variable, return the user_name and path to that user's workspace.
 
     Raises an AutotestError if a tester user is not specified or if a workspace
-    has not been setup for that user.
+    has not been set up for that user.
     """
     user_name = os.environ.get("WORKERUSER")
     if user_name is None:
