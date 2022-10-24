@@ -22,7 +22,7 @@
       "title": "Plugins",
       "properties": {}
     },
-    "data_volumes": {
+    "data_entries": {
       "type": "array",
       "title": "Data Entries",
       "uniqueItems": true,

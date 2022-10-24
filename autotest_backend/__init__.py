@@ -58,7 +58,7 @@ def _create_test_group_result(
     stdout: str, stderr: str, run_time: int, extra_info: Dict, feedback: List, timeout: Optional[int] = None
 ) -> ResultData:
     """
-    Loads the results from a json string in stdout and returns a diction ary containing
+    Loads the results from a json string in stdout and returns a dictionary containing
     the results reported in that json string.
 
     The json string in stdout may be only a partial json so this function parses it as
@@ -244,7 +244,7 @@ def _run_test_specs(
                 timeout_expired = None
                 timeout = test_data.get("timeout")
                 plugin_data = test_data.get("plugins", {})
-                data_names = test_data.get("data_volumes", [])
+                data_names = test_data.get("data_entries", [])
                 try:
                     additional_env_vars = _get_env_vars(test_username, plugin_data, data_names)
                     env_vars = {**os.environ, **additional_env_vars, **settings["_env"]}
