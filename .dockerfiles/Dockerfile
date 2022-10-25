@@ -8,13 +8,7 @@ ARG WORKSPACE
 RUN apt-get update -y && \
     apt-get -y install software-properties-common && \
     add-apt-repository -y ppa:deadsnakes/ppa && \
-    apt-get -y install python3.7 \
-                       python3.7-venv \
-                       python3.8 \
-                       python3.8-venv \
-                       python3.9 \
-                       python3.9-venv \
-                       python3.10 \
+    apt-get -y install python3.10 \
                        python3.10-venv \
                        redis-server \
                        postgresql-client \
