@@ -11,6 +11,7 @@ import requests
 import gzip
 import redis
 import mimetypes
+import rq
 from typing import Optional, Dict, Union, List, Tuple
 
 from .config import config
@@ -28,10 +29,9 @@ ResultData = Dict[str, Union[str, int, type(None), Dict]]
 
 def redis_connection() -> redis.Redis:
     """
-    Return a connection to a redis database determined by the "redis_url"
-    configuration option.
+    Return a connection to a redis database.
     """
-    return redis.Redis.from_url(config["redis_url"], decode_responses=True)
+    return rq.get_current_job().connection
 
 
 def run_test_command(test_username: Optional[str] = None) -> str:

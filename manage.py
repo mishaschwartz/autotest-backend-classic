@@ -12,11 +12,14 @@ import json
 import subprocess
 import getpass
 import argparse
+import redis
 
 from typing import Dict, Callable, Sequence, Iterable, Tuple
 
 from autotest_backend.config import config
-from autotest_backend import redis_connection, run_test_command
+from autotest_backend import run_test_command
+
+REDIS_CONNECTION = redis.Redis.from_url(config["redis_url"], decode_responses=True)
 
 
 def _schema() -> Dict:
@@ -24,7 +27,7 @@ def _schema() -> Dict:
     Return a dictionary representation of the json loaded from the schema_skeleton.json file or from the redis
     database if it exists.
     """
-    schema = redis_connection().get("autotest:schema")
+    schema = REDIS_CONNECTION.get("autotest:schema")
 
     if schema:
         return json.loads(schema)
@@ -126,8 +129,8 @@ class PluginManager(_Manager):
                     _print(f"A plugin named {plugin_name} is already installed", file=sys.stderr, flush=True)
                     continue
                 installed_plugins.update(settings)
-                redis_connection().set(f"autotest:plugin:{plugin_name}", path)
-        redis_connection().set("autotest:schema", json.dumps(schema))
+                REDIS_CONNECTION.set(f"autotest:plugin:{plugin_name}", path)
+        REDIS_CONNECTION.set("autotest:schema", json.dumps(schema))
 
     def remove(self, additional: Sequence = tuple()):
         """
@@ -138,23 +141,23 @@ class PluginManager(_Manager):
 
         installed_plugins = schema["definitions"]["plugins"]["properties"]
         for name in self.args.names + additional:
-            redis_connection().delete(f"autotest:plugin:{name}")
+            REDIS_CONNECTION.delete(f"autotest:plugin:{name}")
             if name in installed_plugins:
                 installed_plugins.remove(name)
             try:
                 installed_plugins.pop(name)
             except KeyError:
                 continue
-        redis_connection().set("autotest:schema", json.dumps(schema))
+        REDIS_CONNECTION.set("autotest:schema", json.dumps(schema))
 
     @staticmethod
     def _get_installed() -> Iterable[Tuple[str, str]]:
         """
         Yield the name and path of all installed plugins
         """
-        for plugin_key in redis_connection().keys("autotest:tuple:*"):
+        for plugin_key in REDIS_CONNECTION.keys("autotest:tuple:*"):
             plugin_name = plugin_key.split(":")[-1]
-            path = redis_connection().get(plugin_key)
+            path = REDIS_CONNECTION.get(plugin_key)
             yield plugin_name, path
 
     def list(self) -> None:
@@ -206,8 +209,8 @@ class TesterManager(_Manager):
                     continue
                 installed_testers.append(tester_name)
                 schema["definitions"]["tester_schemas"]["oneOf"].append(settings)
-                redis_connection().set(f"autotest:tester:{tester_name}", path)
-        redis_connection().set("autotest:schema", json.dumps(schema))
+                REDIS_CONNECTION.set(f"autotest:tester:{tester_name}", path)
+        REDIS_CONNECTION.set("autotest:schema", json.dumps(schema))
 
     def remove(self, additional: Sequence = tuple()) -> None:
         """
@@ -218,23 +221,23 @@ class TesterManager(_Manager):
         tester_settings = schema["definitions"]["tester_schemas"]["oneOf"]
         installed_testers = schema["definitions"]["installed_testers"]["enum"]
         for name in self.args.names + additional:
-            redis_connection().delete(f"autotest:tester:{name}")
+            REDIS_CONNECTION.delete(f"autotest:tester:{name}")
             if name in installed_testers:
                 installed_testers.remove(name)
             for i, settings in enumerate(tester_settings):
                 if name in settings["properties"]["tester_type"]["enum"]:
                     tester_settings.pop(i)
                     break
-        redis_connection().set("autotest:schema", json.dumps(schema))
+        REDIS_CONNECTION.set("autotest:schema", json.dumps(schema))
 
     @staticmethod
     def _get_installed() -> Iterable[Tuple[str, str]]:
         """
         Yield the name and path of all installed testers
         """
-        for tester_key in redis_connection().keys("autotest:tester:*"):
+        for tester_key in REDIS_CONNECTION.keys("autotest:tester:*"):
             tester_name = tester_key.split(":")[-1]
-            path = redis_connection().get(tester_key)
+            path = REDIS_CONNECTION.get(tester_key)
             yield tester_name, path
 
     def list(self) -> None:
@@ -275,8 +278,8 @@ class DataManager(_Manager):
             _print(f"No file or directory can be found at {path}", file=sys.stderr, flush=True)
             return
         installed_volumes.append(name)
-        redis_connection().set(f"autotest:data:{name}", path)
-        redis_connection().set("autotest:schema", json.dumps(schema))
+        REDIS_CONNECTION.set(f"autotest:data:{name}", path)
+        REDIS_CONNECTION.set("autotest:schema", json.dumps(schema))
 
     def remove(self, additional: Sequence = tuple()) -> None:
         """
@@ -287,17 +290,17 @@ class DataManager(_Manager):
         installed_volumes = schema["definitions"]["data_entries"]["items"]["enum"]
         for name in self.args.names + additional:
             installed_volumes.remove(name)
-            redis_connection().delete(f"autotest:data:{name}")
-        redis_connection().set("autotest:schema", json.dumps(schema))
+            REDIS_CONNECTION.delete(f"autotest:data:{name}")
+        REDIS_CONNECTION.set("autotest:schema", json.dumps(schema))
 
     @staticmethod
     def _get_installed() -> Iterable[Tuple[str, str]]:
         """
         Yield the name and path of all installed data entries
         """
-        for data_key in redis_connection().keys("autotest:data:*"):
+        for data_key in REDIS_CONNECTION.keys("autotest:data:*"):
             data_name = data_key.split(":")[-1]
-            path = redis_connection().get(data_key)
+            path = REDIS_CONNECTION.get(data_key)
             yield data_name, path
 
     def list(self) -> None:
@@ -328,7 +331,7 @@ class BackendManager(_Manager):
         """
         _print("checking if redis url is valid:")
         try:
-            redis_connection().keys()
+            REDIS_CONNECTION.keys()
         except Exception as e:
             raise Exception(f'Cannot connect to redis database with url: {config["redis_url"]}') from e
 
@@ -377,7 +380,7 @@ class BackendManager(_Manager):
         self._check_dependencies()
         self._check_users_exist()
         self._create_workspace()
-        redis_connection().set("autotest:schema", json.dumps(_schema()))
+        REDIS_CONNECTION.set("autotest:schema", json.dumps(_schema()))
 
 
 if __name__ == "__main__":
