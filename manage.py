@@ -108,12 +108,8 @@ class PluginManager(_Manager):
         """
         schema = _schema()
         for path in self.args.paths:
-            cli = os.path.join(path, "docker.cli")
+            cli = os.path.join(path, "classic.cli")
             if os.path.isfile(cli):
-                proc = subprocess.run([cli, "install"], capture_output=True, check=False, universal_newlines=True)
-                if proc.returncode:
-                    _print(f"Plugin installation at {path} failed with:\n{proc.stderr}", file=sys.stderr, flush=True)
-                    continue
                 proc = subprocess.run([cli, "settings"], capture_output=True, check=False, universal_newlines=True)
                 if proc.returncode:
                     _print(
@@ -128,6 +124,10 @@ class PluginManager(_Manager):
                 if plugin_name in installed_plugins:
                     _print(f"A plugin named {plugin_name} is already installed", file=sys.stderr, flush=True)
                     continue
+                proc = subprocess.run([cli, "install"], capture_output=True, check=False, universal_newlines=True)
+                if proc.returncode:
+                    _print(f"Plugin installation at {path} failed with:\n{proc.stderr}", file=sys.stderr, flush=True)
+                    continue
                 installed_plugins.update(settings)
                 REDIS_CONNECTION.set(f"autotest:plugin:{plugin_name}", path)
         REDIS_CONNECTION.set("autotest:schema", json.dumps(schema))
@@ -140,7 +140,7 @@ class PluginManager(_Manager):
         schema = _schema()
 
         installed_plugins = schema["definitions"]["plugins"]["properties"]
-        for name in self.args.names + additional:
+        for name in self.args.names + list(additional):
             REDIS_CONNECTION.delete(f"autotest:plugin:{name}")
             if name in installed_plugins:
                 installed_plugins.remove(name)
@@ -189,10 +189,6 @@ class TesterManager(_Manager):
         for path in self.args.paths:
             cli = os.path.join(path, "classic.cli")
             if os.path.isfile(cli):
-                proc = subprocess.run([cli, "install"], capture_output=True, check=False, universal_newlines=True)
-                if proc.returncode:
-                    _print(f"Tester installation at {path} failed with:\n{proc.stderr}", file=sys.stderr, flush=True)
-                    continue
                 proc = subprocess.run([cli, "settings"], capture_output=True, check=False, universal_newlines=True)
                 if proc.returncode:
                     _print(
@@ -207,10 +203,15 @@ class TesterManager(_Manager):
                 if tester_name in installed_testers:
                     _print(f"A tester named {tester_name} is already installed", file=sys.stderr, flush=True)
                     continue
+                proc = subprocess.run([cli, "install"], capture_output=True, check=False, universal_newlines=True)
+                if proc.returncode:
+                    _print(f"Tester installation at {path} failed with:\n{proc.stderr}", file=sys.stderr, flush=True)
+                    continue
                 installed_testers.append(tester_name)
                 schema["definitions"]["tester_schemas"]["oneOf"].append(settings)
                 REDIS_CONNECTION.set(f"autotest:tester:{tester_name}", path)
         REDIS_CONNECTION.set("autotest:schema", json.dumps(schema))
+        REDIS_CONNECTION.set("autotest:backend:version", 3)
 
     def remove(self, additional: Sequence = tuple()) -> None:
         """
@@ -220,12 +221,12 @@ class TesterManager(_Manager):
         schema = _schema()
         tester_settings = schema["definitions"]["tester_schemas"]["oneOf"]
         installed_testers = schema["definitions"]["installed_testers"]["enum"]
-        for name in self.args.names + additional:
+        for name in self.args.names + list(additional):
             REDIS_CONNECTION.delete(f"autotest:tester:{name}")
             if name in installed_testers:
                 installed_testers.remove(name)
             for i, settings in enumerate(tester_settings):
-                if name in settings["properties"]["tester_type"]["enum"]:
+                if name == settings["properties"]["tester_type"]["const"]:
                     tester_settings.pop(i)
                     break
         REDIS_CONNECTION.set("autotest:schema", json.dumps(schema))
@@ -288,7 +289,7 @@ class DataManager(_Manager):
         """
         schema = _schema()
         installed_volumes = schema["definitions"]["data_entries"]["items"]["enum"]
-        for name in self.args.names + additional:
+        for name in self.args.names + list(additional):
             installed_volumes.remove(name)
             REDIS_CONNECTION.delete(f"autotest:data:{name}")
         REDIS_CONNECTION.set("autotest:schema", json.dumps(schema))

@@ -49,7 +49,7 @@ def run_test_command(test_username: Optional[str] = None) -> str:
     """
     cmd = "{}"
     if test_username is not None:
-        cmd = f"sudo -Eu {test_username} -- " + "{}"
+        cmd = f"sudo -Eu {test_username} -- " + "{} '{}'"
 
     return cmd
 
@@ -234,21 +234,21 @@ def _run_test_specs(
     results = []
 
     for settings in test_settings["testers"]:
-        args = cmd.format(settings["_command"])
-
         for test_data in settings["test_data"]:
             test_category = test_data.get("category", [])
             if set(test_category) & set(categories):
                 start = time.time()
                 out, err = "", ""
                 timeout_expired = None
-                timeout = test_data.get("timeout")
+                timeout = test_data["timeout"]
                 plugin_data = test_data.get("plugins", {})
                 data_names = test_data.get("data_entries", [])
                 try:
                     additional_env_vars = _get_env_vars(test_username, plugin_data, data_names)
                     env_vars = {**os.environ, **additional_env_vars, **settings["_env"]}
                     env_vars = _update_env_vars(env_vars, test_env_vars)
+                    settings_json = json.dumps({"test_data": test_data})
+                    args = cmd.format(settings["_command"], settings_json)
                     proc = subprocess.Popen(
                         args,
                         start_new_session=True,
@@ -256,14 +256,12 @@ def _run_test_specs(
                         shell=True,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
-                        stdin=subprocess.PIPE,
                         preexec_fn=set_rlimits_before_test,
                         universal_newlines=True,
                         env=env_vars,
                     )
                     try:
-                        settings_json = json.dumps({**settings, "test_data": test_data})
-                        out, err = proc.communicate(input=settings_json, timeout=timeout)
+                        out, err = proc.communicate(timeout=timeout)
                     except subprocess.TimeoutExpired:
                         if test_username == getpass.getuser():
                             pgrp = os.getpgid(proc.pid)
@@ -322,7 +320,7 @@ def _setup_files(settings_id: int, user: str, files_url: str, tests_path: str, t
     """
     creds = json.loads(redis_connection().hget("autotest:user_credentials", key=user))
     r = requests.get(files_url, headers={"Authorization": f"{creds['auth_type']} {creds['credentials']}"})
-    extract_zip_stream(r.content, tests_path, ignore_root_dirs=1)
+    extract_zip_stream(r.content, tests_path)
     for fd, file_or_dir in recursive_iglob(tests_path):
         if fd == "d":
             os.chmod(file_or_dir, 0o770)
@@ -422,7 +420,7 @@ def update_test_settings(user: str, settings_id: Union[str, int], test_settings:
         os.makedirs(files_dir, exist_ok=True)
         creds = json.loads(redis_connection().hget("autotest:user_credentials", key=user))
         r = requests.get(file_url, headers={"Authorization": f"{creds['auth_type']} {creds['credentials']}"})
-        extract_zip_stream(r.content, files_dir, ignore_root_dirs=0)
+        extract_zip_stream(r.content, files_dir)
 
         schema = json.loads(redis_connection().get("autotest:schema"))
         installed_testers = schema["definitions"]["installed_testers"]["enum"]
@@ -433,10 +431,10 @@ def update_test_settings(user: str, settings_id: Union[str, int], test_settings:
                 raise Exception(f"tester {tester_type} is not installed")
             env_dir = os.path.join(settings_dir, f"{tester_type}_{i}")
 
-            tester_path = redis_connection().get(f"autotest:tester:{tester_type}")
+            tester_path = redis_connection().get(f"autotest:tester:{tester_type}").decode()
             try:
                 env_data = tester_settings.get("env_data", {})
-                version = env_data.get("version", "")
+                version = str(env_data.get("version", ""))
                 requirements = env_data.get("requirements", "")
                 proc = subprocess.run(
                     [os.path.join(tester_path, "classic.cli"), "create_environment", version, requirements, env_dir],

@@ -19,27 +19,19 @@ SECONDS_PER_DAY = 86400
 
 HEADER = f"""[supervisord]
 
-[supervisorctl]
-
-[inet_http_server]
-port = {config['supervisor_url']}
-
-[rpcinterface:supervisor]
-supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
-
 """
 
 CONTENT = """[program:rq_worker_{worker_user}]
 environment=WORKERUSER={worker_user}
 command={rq} worker {worker_args} settings {queues}
 process_name=rq_worker_{worker_user}
-numprocs={numprocs}
 directory={directory}
 stopsignal=TERM
 autostart=true
 autorestart=true
 stopasgroup=true
 killasgroup=true
+{log_info}
 
 """
 
@@ -47,24 +39,45 @@ killasgroup=true
 REDIS_CONNECTION = redis.Redis.from_url(config["redis_url"], decode_responses=True)
 
 
-def create_enqueuer_wrapper(rq):
+def get_log_info(log, error_log):
+    log_info = []
+    if log:
+        if log == '-':
+            log_info.extend(["stdout_logfile=/dev/fd/1", "stdout_logfile_maxbytes=0"])
+        else:
+            log_info.append(f"stdout_logfile={log}")
+    if error_log:
+        if error_log == '-':
+            if log == '-':
+                log_info.append(f"redirect_stderr=true")
+            else:
+                log_info.extend(["stderr_logfile=/dev/fd/2", "stderr_logfile_maxbytes=0"])
+        else:
+            log_info.append(f"stderr_logfile={error_log}")
+    return "\n".join(log_info)
+
+
+def create_enqueuer_wrapper(rq, log, error_log):
+    log_info = get_log_info(log, error_log)
     with open(_CONF_FILE, "w") as f:
         f.write(HEADER)
         for worker_data in config["workers"]:
             c = CONTENT.format(
                 worker_user=worker_data["user"],
                 rq=rq,
-                worker_args=f'--url {config["redis_url"]}',
-                queues=" ".join(worker_data["queues"]),
-                numprocs=1,
+                worker_args=f"--url {config['redis_url']} --log-format '{worker_data['user']} %%(asctime)s %%(message)s'",
+                queues=" ".join(worker_data.get("queues", "high low batch".split())),
                 directory=os.path.dirname(os.path.realpath(__file__)),
+                log_info=log_info,
             )
             f.write(c)
 
 
-def start(rq, supervisord, extra_args):
-    create_enqueuer_wrapper(rq)
-    subprocess.run([supervisord, "-c", _CONF_FILE, *extra_args], check=True, cwd=_THIS_DIR)
+def start(rq, supervisord, log, error_log, extra_args):
+    create_enqueuer_wrapper(rq, log, error_log)
+    proc = subprocess.run([supervisord, "-c", _CONF_FILE, *extra_args], cwd=_THIS_DIR, capture_output=True)
+    if proc.returncode:
+        raise Exception(f"supervisord failed to start with the following error:\n{proc.stderr}")
 
 
 def stop():
@@ -130,15 +143,17 @@ if __name__ == "__main__":
                 type=_exec_type,
                 help=f"path to supervisord executable, default={_SUPERVISORD}",
             )
+            parser_.add_argument('-l', '--log', help='path to log file to write rq logs to.')
+            parser_.add_argument('-e', '--error_log', help='path to log file to write rq error logs to.')
 
     args, remainder = parser.parse_known_args()
     if args.command == "start":
-        start(args.rq, args.supervisord, remainder)
+        start(args.rq, args.supervisord, args.log, args.error_log, remainder)
     elif args.command == "stop":
         stop()
     elif args.command == "restart":
         stop()
-        start(args.rq, args.supervisord, remainder)
+        start(args.rq, args.supervisord, args.log, args.error_log, remainder)
     elif args.command == "stat":
         stat(args.rq, remainder)
     elif args.command == "clean":
