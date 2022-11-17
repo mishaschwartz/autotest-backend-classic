@@ -211,7 +211,6 @@ class TesterManager(_Manager):
                 schema["definitions"]["tester_schemas"]["oneOf"].append(settings)
                 REDIS_CONNECTION.set(f"autotest:tester:{tester_name}", path)
         REDIS_CONNECTION.set("autotest:schema", json.dumps(schema))
-        REDIS_CONNECTION.set("autotest:backend:version", 3)
 
     def remove(self, additional: Sequence = tuple()) -> None:
         """
@@ -358,7 +357,7 @@ class BackendManager(_Manager):
             )
             try:
                 subprocess.run(
-                    run_test_command(username).format("echo test"), stdout=subprocess.DEVNULL, shell=True, check=True
+                    run_test_command(username).format("echo", "test"), stdout=subprocess.DEVNULL, shell=True, check=True
                 )
             except Exception as e:
                 raise Exception(f"user {getpass.getuser()} cannot run commands as the {username} user") from e

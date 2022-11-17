@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -e
+
 python3 /app/manage.py install
 
 for tester in /testers/*; do

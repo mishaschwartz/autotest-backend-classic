@@ -235,7 +235,7 @@ def _run_test_specs(
 
     for settings in test_settings["testers"]:
         for test_data in settings["test_data"]:
-            test_category = test_data.get("category", [])
+            test_category = test_data.get("categories", [])
             if set(test_category) & set(categories):
                 start = time.time()
                 out, err = "", ""
